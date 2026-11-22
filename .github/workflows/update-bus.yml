@@ -1,0 +1,41 @@
+name: Update bus feed (Ireland + Northern Ireland)
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: bus-feed
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download inputs (TFI, Translink, GeoNames)
+        run: python3 fetch_inputs.py --out inputs
+      - name: Build bus.json.gz
+        run: |
+          python3 build_data.py --gtfs inputs/gtfs --geonames inputs/IE_NI.txt \
+            --out out --busfeed feed-out
+          ls -la feed-out
+      - name: Publish to the feed branch
+        run: |
+          set -euo pipefail
+          git config user.name  "bustrain-bot"
+          git config user.email "actions@users.noreply.github.com"
+          BUILT=$(python3 -c "import gzip,json;print(json.loads(gzip.decompress(open('feed-out/bus.json.gz','rb').read()))['meta']['built'])")
+          echo "Feed built: $BUILT"
+          git checkout --orphan feed-tmp
+          git rm -rf --cached . > /dev/null
+          cp feed-out/bus.json.gz bus.json.gz
+          printf '%s\n' "$BUILT" > VERSION
+          git add bus.json.gz VERSION
+          git commit -m "Bus feed $BUILT"
+          git branch -M feed
+          git push -f origin feed
